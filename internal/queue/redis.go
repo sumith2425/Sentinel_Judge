@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"time"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
@@ -116,4 +117,18 @@ func (r *RedisClient) GetLiveStatus(ctx context.Context, id uuid.UUID) (*models.
 		return nil, err
 	}
 	return &update, nil
+}
+
+func (r *RedisClient) GetServerRunID(ctx context.Context) (string, error) {
+	info, err := r.client.Info(ctx, "server").Result()
+	if err != nil {
+		return "", err
+	}
+	for _, line := range strings.Split(info, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "run_id:") {
+			return strings.TrimPrefix(line, "run_id:"), nil
+		}
+	}
+	return "", errors.New("run_id not found in redis INFO server")
 }

@@ -1,4 +1,3 @@
-version: '3.8'
 
 services:
   postgres:
@@ -34,6 +33,59 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile.api
+    container_name: sentinel-api
+    restart: always
+    ports:
+      - "8080:8080"
+    environment:
+      POSTGRES_DSN: "postgres://sentinel:sentinel_pass@postgres:5432/sentinel_judge?sslmode=disable"
+      REDIS_ADDR: "redis:6379"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile.worker
+    container_name: sentinel-worker
+    restart: always
+    environment:
+      POSTGRES_DSN: "postgres://sentinel:sentinel_pass@postgres:5432/sentinel_judge?sslmode=disable"
+      REDIS_ADDR: "redis:6379"
+      PROBLEMS_DIR: "/problems"
+      WORK_DIR: "/tmp/sentinel-work"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./testdata/problems:/problems:ro
+      - /tmp/sentinel-work:/tmp/sentinel-work
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  sweeper:
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile.sweeper
+    container_name: sentinel-sweeper
+    restart: always
+    environment:
+      POSTGRES_DSN: "postgres://sentinel:sentinel_pass@postgres:5432/sentinel_judge?sslmode=disable"
+      REDIS_ADDR: "redis:6379"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
 volumes:
   postgres_data:

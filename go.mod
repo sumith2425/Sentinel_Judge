@@ -1,6 +1,6 @@
 module github.com/sumith2425/sentinel-judge
 
-go 1.26.8
+go 1.26.0
 
 require (
 	github.com/go-chi/chi/v5 v5.5.0

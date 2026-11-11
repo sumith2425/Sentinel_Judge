@@ -138,3 +138,92 @@ func (s *Store) GetSubmission(ctx context.Context, id uuid.UUID) (*models.Submis
 	}
 	return &sub, nil
 }
+
+func (s *Store) GetStalePendingSubmissions(ctx context.Context, olderThan time.Duration) ([]models.Submission, error) {
+	query := `
+		SELECT 
+			submission_id, user_id, question_id, language, code,
+			time_limit_ms, memory_limit_mb, status, verdict_details,
+			execution_time_ms, execution_memory_kb, retry_count,
+			submitted_at, started_at, completed_at
+		FROM submissions
+		WHERE status = $1 AND submitted_at < NOW() - $2::interval
+	`
+	intervalStr := olderThan.String()
+	return s.querySubmissions(ctx, query, models.StatusPendingQueue, intervalStr)
+}
+
+func (s *Store) GetAllQueuedSubmissions(ctx context.Context) ([]models.Submission, error) {
+	query := `
+		SELECT 
+			submission_id, user_id, question_id, language, code,
+			time_limit_ms, memory_limit_mb, status, verdict_details,
+			execution_time_ms, execution_memory_kb, retry_count,
+			submitted_at, started_at, completed_at
+		FROM submissions
+		WHERE status = $1
+		ORDER BY submitted_at ASC
+	`
+	return s.querySubmissions(ctx, query, models.StatusQueued)
+}
+
+func (s *Store) GetProcessingSubmissions(ctx context.Context) ([]models.Submission, error) {
+	query := `
+		SELECT 
+			submission_id, user_id, question_id, language, code,
+			time_limit_ms, memory_limit_mb, status, verdict_details,
+			execution_time_ms, execution_memory_kb, retry_count,
+			submitted_at, started_at, completed_at
+		FROM submissions
+		WHERE status = $1
+	`
+	return s.querySubmissions(ctx, query, models.StatusProcessing)
+}
+
+func (s *Store) IncrementRetryAndRequeue(ctx context.Context, id uuid.UUID) (int, error) {
+	query := `
+		UPDATE submissions
+		SET retry_count = retry_count + 1,
+		    status = $1,
+		    started_at = NULL
+		WHERE submission_id = $2
+		RETURNING retry_count
+	`
+	var newCount int
+	err := s.db.QueryRowContext(ctx, query, models.StatusQueued, id).Scan(&newCount)
+	return newCount, err
+}
+
+func (s *Store) querySubmissions(ctx context.Context, query string, args ...any) ([]models.Submission, error) {
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []models.Submission
+	for rows.Next() {
+		var sub models.Submission
+		if err := rows.Scan(
+			&sub.SubmissionID,
+			&sub.UserID,
+			&sub.QuestionID,
+			&sub.Language,
+			&sub.Code,
+			&sub.TimeLimitMS,
+			&sub.MemoryLimitMB,
+			&sub.Status,
+			&sub.VerdictDetails,
+			&sub.ExecutionTimeMS,
+			&sub.ExecutionMemoryKB,
+			&sub.RetryCount,
+			&sub.SubmittedAt,
+			&sub.StartedAt,
+			&sub.CompletedAt,
+		); err != nil {
+			return nil, err
+		}
+		results = append(results, sub)
+	}
+	return results, rows.Err()
+}
