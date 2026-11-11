@@ -1,0 +1,126 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sentinel-config
+data:
+  POSTGRES_DSN: "postgres://sentinel:sentinel_pass@sentinel-postgres:5432/sentinel_judge?sslmode=disable"
+  REDIS_ADDR: "sentinel-redis:6379"
+  PROBLEMS_DIR: "/problems"
+  WORK_DIR: "/tmp/sentinel-work"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sentinel-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: sentinel-api
+  template:
+    metadata:
+      labels:
+        app: sentinel-api
+    spec:
+      containers:
+        - name: api
+          image: sentinel-judge/api:latest
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: sentinel-config
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sentinel-api-svc
+spec:
+  type: LoadBalancer
+  selector:
+    app: sentinel-api
+  ports:
+    - port: 80
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sentinel-worker
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: sentinel-worker
+  template:
+    metadata:
+      labels:
+        app: sentinel-worker
+    spec:
+      containers:
+        - name: worker
+          image: sentinel-judge/worker:latest
+          envFrom:
+            - configMapRef:
+                name: sentinel-config
+          resources:
+            requests:
+              cpu: "1000m"
+              memory: "512Mi"
+            limits:
+              cpu: "2000m"
+              memory: "1024Mi"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sentinel-sweeper
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sentinel-sweeper
+  template:
+    metadata:
+      labels:
+        app: sentinel-sweeper
+    spec:
+      containers:
+        - name: sweeper
+          image: sentinel-judge/sweeper:latest
+          envFrom:
+            - configMapRef:
+                name: sentinel-config
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "64Mi"
+            limits:
+              cpu: "250m"
+              memory: "128Mi"
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: sentinel-worker-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: sentinel-worker
+  minReplicas: 2
+  maxReplicas: 20
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

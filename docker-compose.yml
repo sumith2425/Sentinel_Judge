@@ -55,7 +55,6 @@ services:
     build:
       context: .
       dockerfile: deploy/docker/Dockerfile.worker
-    container_name: sentinel-worker
     restart: always
     environment:
       POSTGRES_DSN: "postgres://sentinel:sentinel_pass@postgres:5432/sentinel_judge?sslmode=disable"
