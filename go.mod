@@ -3,6 +3,7 @@ module github.com/sumith2425/sentinel-judge
 go 1.26.8
 
 require (
+	github.com/go-chi/chi/v5 v5.5.0
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.12.0
 	github.com/redis/go-redis/v9 v9.23.0
