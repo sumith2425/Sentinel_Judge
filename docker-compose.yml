@@ -45,6 +45,8 @@ services:
     environment:
       POSTGRES_DSN: "postgres://sentinel:sentinel_pass@postgres:5432/sentinel_judge?sslmode=disable"
       REDIS_ADDR: "redis:6379"
+    volumes:
+      - ./web:/app/web:ro
     depends_on:
       postgres:
         condition: service_healthy

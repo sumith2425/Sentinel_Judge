@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SentinelJudge — Algorithmic Problem Set & Evaluation Workspace</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <link rel="stylesheet" href="/styles.css?v=12">
+</head>
+<body>
+    <header class="topbar">
+        <div class="topbar-left">
+            <a href="#/" class="brand" id="brandHomeLink" title="Return to Problem Catalog">
+                <span class="brand-mark"></span>
+                <span class="brand-name">SENTINEL<span class="brand-weight-normal">JUDGE</span></span>
+            </a>
+            <div class="divider-vertical"></div>
+            <nav class="primary-nav">
+                <button id="navCatalogBtn" class="nav-link active">Problem Catalog</button>
+                <button id="navWorkspaceBtn" class="nav-link">Active Workspace</button>
+            </nav>
+        </div>
+
+        <div class="topbar-right">
+            <div class="cluster-status" id="clusterStatus">
+                <span class="status-dot operational"></span>
+                <span class="status-label" id="clusterStatusText">CLUSTER OPERATIONAL</span>
+            </div>
+            <div id="workspaceSubmitWrap" class="workspace-submit-wrap hidden">
+                <div class="divider-vertical"></div>
+                <button id="submitBtn" class="btn-primary">
+                    <span>Evaluate Submission</span>
+                    <kbd class="shortcut-hint">Ctrl+Enter</kbd>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <div id="catalogView" class="catalog-view">
+        <div class="catalog-container">
+            <section class="catalog-hero">
+                <div class="catalog-hero-left">
+                    <span class="catalog-eyebrow">ALGORITHMIC ARCHIVE &amp; BENCHMARK SUITE</span>
+                    <h1 class="catalog-headline">Problem Set</h1>
+                    <p class="catalog-subhead">Select a specification to launch the isolated execution workspace. All submissions are evaluated under deterministic Linux kernel cgroup boundaries.</p>
+                </div>
+
+                <div class="catalog-stats-card">
+                    <div class="stat-grid">
+                        <div class="stat-cell">
+                            <span class="stat-label">SOLVED</span>
+                            <span class="stat-value stat-ac" id="statSolvedCount">0</span>
+                        </div>
+                        <div class="stat-cell">
+                            <span class="stat-label">ATTEMPTED</span>
+                            <span class="stat-value stat-warn" id="statAttemptedCount">0</span>
+                        </div>
+                        <div class="stat-cell">
+                            <span class="stat-label">TOTAL TASKS</span>
+                            <span class="stat-value" id="statTotalCount">0</span>
+                        </div>
+                    </div>
+                    <div class="progress-track">
+                        <div class="progress-fill" id="catalogProgressBar" style="width: 0%"></div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="catalog-controls-bar">
+                <div class="search-input-wrap">
+                    <input type="search" id="catalogSearchInput" class="catalog-search-input" placeholder="Search by problem number, title, or topic (e.g., 1068, Dynamic Programming)...">
+                </div>
+                <div class="segmented-control" id="statusFilterGroup">
+                    <button class="seg-btn active" data-filter="all">All Tasks</button>
+                    <button class="seg-btn" data-filter="unsolved">Unsolved</button>
+                    <button class="seg-btn" data-filter="solved">Solved</button>
+                </div>
+            </section>
+
+            <div class="catalog-body-grid">
+                <aside class="catalog-sidebar">
+                    <div class="sidebar-sticky">
+                        <span class="sidebar-heading">TOPICS DIRECTORY</span>
+                        <nav id="topicNavList" class="topic-nav-list"></nav>
+                    </div>
+                </aside>
+
+                <section id="catalogSectionsContainer" class="catalog-sections-container"></section>
+            </div>
+        </div>
+    </div>
+
+    <main id="workspaceView" class="workspace-grid hidden">
+        <section class="pane pane-left">
+            <div class="pane-header">
+                <div class="tab-group" role="tablist">
+                    <button class="tab-btn active" data-tab="specTab" role="tab">Specification</button>
+                    <button class="tab-btn" data-tab="historyTab" role="tab">Session Ledger <span id="historyCount" class="badge-count">0</span></button>
+                </div>
+                <div class="resource-limits">
+                    <span class="limit-pill" id="testCountPill">TESTS: —</span>
+                    <span class="limit-pill" id="timeLimitPill">TL: — MS</span>
+                    <span class="limit-pill" id="memLimitPill">ML: — MB</span>
+                </div>
+            </div>
+
+            <div id="specTab" class="tab-panel active">
+                <div class="problem-header">
+                    <div class="problem-meta-row">
+                        <span class="problem-category" id="problemDifficulty">LOADING...</span>
+                        <span class="problem-solve-badge hidden" id="problemSolveBadge">SOLVED</span>
+                    </div>
+                    <h1 class="problem-title" id="problemTitle">Loading specification...</h1>
+                </div>
+
+                <div class="spec-section">
+                    <h2 class="spec-heading">Problem Statement</h2>
+                    <div class="spec-body" id="problemDescription"></div>
+                </div>
+
+                <div class="spec-grid-2col">
+                    <div class="spec-section">
+                        <h2 class="spec-heading">Input Format</h2>
+                        <div class="spec-body-sm" id="problemInputFormat"></div>
+                    </div>
+                    <div class="spec-section">
+                        <h2 class="spec-heading">Output Format</h2>
+                        <div class="spec-body-sm" id="problemOutputFormat"></div>
+                    </div>
+                </div>
+
+                <div class="spec-section">
+                    <h2 class="spec-heading">Execution Constraints &amp; Sandbox Boundaries</h2>
+                    <ul class="constraints-list" id="problemConstraints"></ul>
+                </div>
+
+                <div class="spec-section">
+                    <h2 class="spec-heading">Sample Test Vectors</h2>
+                    <div id="problemExamples" class="examples-list"></div>
+                </div>
+            </div>
+
+            <div id="historyTab" class="tab-panel">
+                <div class="ledger-container">
+                    <table class="ledger-table">
+                        <thead>
+                            <tr>
+                                <th>Submission UUID</th>
+                                <th>Problem</th>
+                                <th>Lang</th>
+                                <th>Verdict</th>
+                                <th>Latency</th>
+                            </tr>
+                        </thead>
+                        <tbody id="historyTableBody">
+                            <tr class="empty-row">
+                                <td colspan="5">No submissions evaluated in this session yet.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <section class="pane pane-right">
+            <div class="pane-header editor-toolbar">
+                <div class="segmented-control" id="langSelector">
+                    <button class="seg-btn active" data-lang="cpp">C++ (GCC)</button>
+                    <button class="seg-btn" data-lang="python">Python 3.12</button>
+                    <button class="seg-btn" data-lang="go">Go 1.22</button>
+                </div>
+
+                <div class="toolbar-actions">
+                    <button id="resetCodeBtn" class="btn-ghost" title="Reset to starter template">Reset Template</button>
+                </div>
+            </div>
+
+            <div id="editorContainer" class="editor-container"></div>
+
+            <div class="telemetry-console" id="telemetryConsole">
+                <div class="telemetry-header">
+                    <div class="telemetry-title-group">
+                        <span class="telemetry-heading">EXECUTION TELEMETRY</span>
+                        <span class="submission-uuid-label" id="activeSubmissionId">READY</span>
+                    </div>
+                    <div class="telemetry-metrics">
+                        <span class="metric-item">TIME: <strong id="metricTime">—</strong></span>
+                        <span class="metric-divider">|</span>
+                        <span class="metric-item">MEMORY: <strong id="metricMemory">—</strong></span>
+                    </div>
+                </div>
+
+                <div class="pipeline-stepper">
+                    <div class="step-item" id="stepQueued">
+                        <span class="step-index">01</span>
+                        <span class="step-name">QUEUED</span>
+                    </div>
+                    <div class="step-connector"></div>
+                    <div class="step-item" id="stepCompiling">
+                        <span class="step-index">02</span>
+                        <span class="step-name">COMPILING</span>
+                    </div>
+                    <div class="step-connector"></div>
+                    <div class="step-item" id="stepRunning">
+                        <span class="step-index">03</span>
+                        <span class="step-name" id="stepRunningLabel">RUNNING TESTS</span>
+                    </div>
+                    <div class="step-connector"></div>
+                    <div class="step-item" id="stepVerdict">
+                        <span class="step-index">04</span>
+                        <span class="step-name" id="stepVerdictLabel">VERDICT</span>
+                    </div>
+                </div>
+
+                <div class="verdict-banner" id="verdictBanner">
+                    <div class="verdict-status-row">
+                        <span class="verdict-badge" id="verdictBadge">IDLE</span>
+                        <span class="verdict-timestamp" id="verdictTimestamp">Awaiting submission dispatch</span>
+                    </div>
+                    <pre class="verdict-details" id="verdictDetails">Ready for evaluation.</pre>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/loader.min.js"></script>
+    <script src="/app.js?v=12"></script>
+</body>
+</html>

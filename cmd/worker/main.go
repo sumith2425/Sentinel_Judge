@@ -47,10 +47,7 @@ func main() {
 	}
 	defer rQueue.Close()
 
-	runner, err := sandbox.NewRunner(problemsDir, workDir)
-	if err != nil {
-		log.Fatalf("Failed to initialize sandbox runner: %v", err)
-	}
+	runner := sandbox.NewRunner(problemsDir, workDir)
 
 	loopCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -134,10 +131,12 @@ func processSubmission(
 	}
 
 	finalUpdate := &models.LiveStatusUpdate{
-		SubmissionID:   sub.SubmissionID,
-		Status:         result.Verdict,
-		VerdictDetails: result.VerdictDetails,
-		LastHeartbeat:  time.Now().UTC(),
+		SubmissionID:      sub.SubmissionID,
+		Status:            result.Verdict,
+		VerdictDetails:    result.VerdictDetails,
+		ExecutionTimeMS:   &timeVal,
+		ExecutionMemoryKB: memPtr,
+		LastHeartbeat:     time.Now().UTC(),
 	}
 	if err := rQueue.SetLiveStatus(jobCtx, finalUpdate); err != nil {
 		log.Printf("Failed to publish final live status for %s: %v", sub.SubmissionID, err)

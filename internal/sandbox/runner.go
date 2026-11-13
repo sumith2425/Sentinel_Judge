@@ -3,19 +3,20 @@ package sandbox
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/sumith2425/sentinel-judge/internal/models"
 )
 
-type ProgressCallback func(status models.SubmissionStatus, currentTest, totalTests int)
+type ProgressCallback func(status models.SubmissionStatus, currentTest int, totalTests int)
 
 type ExecutionResult struct {
 	Verdict           models.SubmissionStatus
@@ -26,140 +27,140 @@ type ExecutionResult struct {
 
 type Runner struct {
 	ProblemsDir string
-	WorkDirBase string
+	WorkDir     string
 }
 
-func NewRunner(problemsDir, workDirBase string) (*Runner, error) {
-	absProb, err := filepath.Abs(problemsDir)
-	if err != nil {
-		return nil, err
-	}
-	absWork, err := filepath.Abs(workDirBase)
-	if err != nil {
-		return nil, err
-	}
-	if err := os.MkdirAll(absWork, 0755); err != nil {
-		return nil, err
-	}
+func NewRunner(problemsDir, workDir string) *Runner {
 	return &Runner{
-		ProblemsDir: absProb,
-		WorkDirBase: absWork,
-	}, nil
+		ProblemsDir: problemsDir,
+		WorkDir:     workDir,
+	}
 }
 
 func (r *Runner) Evaluate(ctx context.Context, sub *models.Submission, onProgress ProgressCallback) *ExecutionResult {
-	jobDir := filepath.Join(r.WorkDirBase, sub.SubmissionID.String())
-	if err := os.MkdirAll(jobDir, 0777); err != nil {
-		msg := fmt.Sprintf("failed to create workspace: %v", err)
+	jobDir := filepath.Join(r.WorkDir, sub.SubmissionID.String())
+	if err := os.MkdirAll(jobDir, 0755); err != nil {
+		msg := fmt.Sprintf("Failed to create sandbox directory: %v", err)
 		return &ExecutionResult{Verdict: models.StatusInternalError, VerdictDetails: &msg}
 	}
 	defer os.RemoveAll(jobDir)
 
-	var sourceFile, image, compileCmd, runCmd string
+	var sourceFile, compileCmd, runCmd, image string
 
 	switch sub.Language {
 	case models.LangCPP:
-		sourceFile = "main.cpp"
 		image = "frolvlad/alpine-gxx:latest"
-		compileCmd = "g++ -O2 /workspace/main.cpp -o /workspace/solution"
+		sourceFile = "main.cpp"
+		compileCmd = "g++ -O2 -std=c++20 /workspace/main.cpp -o /workspace/solution"
 		runCmd = "/workspace/solution"
 	case models.LangPython:
-		sourceFile = "main.py"
 		image = "python:3.12-alpine"
+		sourceFile = "main.py"
 		compileCmd = "python3 -m py_compile /workspace/main.py"
 		runCmd = "python3 /workspace/main.py"
 	case models.LangGo:
-		sourceFile = "main.go"
 		image = "golang:1.22-alpine"
+		sourceFile = "main.go"
 		compileCmd = "GOCACHE=/tmp/gocache go build -o /workspace/solution /workspace/main.go"
 		runCmd = "/workspace/solution"
 	default:
-		msg := fmt.Sprintf("unsupported language: %s", sub.Language)
-		return &ExecutionResult{Verdict: models.StatusInternalError, VerdictDetails: &msg}
+		msg := fmt.Sprintf("Unsupported language: %s", sub.Language)
+		return &ExecutionResult{Verdict: models.StatusCompilationError, VerdictDetails: &msg}
 	}
 
 	sourcePath := filepath.Join(jobDir, sourceFile)
 	if err := os.WriteFile(sourcePath, []byte(sub.Code), 0644); err != nil {
-		msg := fmt.Sprintf("failed to write source file: %v", err)
+		msg := fmt.Sprintf("Failed to write source code: %v", err)
 		return &ExecutionResult{Verdict: models.StatusInternalError, VerdictDetails: &msg}
 	}
 
-	testInputs, err := r.discoverTestCases(sub.QuestionID)
-	if err != nil || len(testInputs) == 0 {
-		msg := fmt.Sprintf("test cases not found for problem: %s", sub.QuestionID)
-		return &ExecutionResult{Verdict: models.StatusInternalError, VerdictDetails: &msg}
-	}
-
-	totalTests := len(testInputs)
 	if onProgress != nil {
-		onProgress(models.StatusCompiling, 0, totalTests)
+		onProgress(models.StatusCompiling, 0, 0)
 	}
 
-	compCtx, compCancel := context.WithTimeout(ctx, 10*time.Second)
+	compCtx, compCancel := context.WithTimeout(ctx, 30*time.Second)
 	defer compCancel()
 
-	compOut, compExitCode, compTimedOut := r.runDockerContainer(
+	compOut, compExitCode, compTimedOut := r.runOneShotContainer(
 		compCtx,
 		image,
 		jobDir,
 		compileCmd,
-		nil,
 		512,
-		false,
+		512,
 	)
 
 	if compTimedOut {
-		msg := "Compilation timed out (exceeded 10s)"
+		msg := "Compilation timed out (exceeded 30s)"
 		return &ExecutionResult{Verdict: models.StatusCompilationError, VerdictDetails: &msg}
 	}
 	if compExitCode != 0 {
-		msg := strings.TrimSpace(compOut)
-		if msg == "" {
-			msg = fmt.Sprintf("Compilation failed with exit code %d", compExitCode)
-		}
+		msg := truncateOutput(compOut, 2048)
 		return &ExecutionResult{Verdict: models.StatusCompilationError, VerdictDetails: &msg}
 	}
 
+	problemPath := filepath.Join(r.ProblemsDir, sub.QuestionID)
+	inputFiles, err := filepath.Glob(filepath.Join(problemPath, "*.in"))
+	if err != nil || len(inputFiles) == 0 {
+		msg := fmt.Sprintf("No test cases found for problem %s", sub.QuestionID)
+		return &ExecutionResult{Verdict: models.StatusInternalError, VerdictDetails: &msg}
+	}
+	sortTestFiles(inputFiles)
+
+	totalTests := len(inputFiles)
 	maxTimeMS := 0
-	for i, inPath := range testInputs {
+
+	execContainerName := fmt.Sprintf("sbx-exec-%s", uuid.New().String()[:12])
+	if err := r.startPersistentSandbox(ctx, execContainerName, image, jobDir, sub.MemoryLimitMB, 64); err != nil {
+		msg := fmt.Sprintf("Failed to initialize execution sandbox: %v", err)
+		return &ExecutionResult{Verdict: models.StatusInternalError, VerdictDetails: &msg}
+	}
+	defer func() {
+		_ = exec.Command("docker", "rm", "-f", execContainerName).Run()
+	}()
+
+	timeoutSec := float64(sub.TimeLimitMS) / 1000.0
+	if timeoutSec < 0.1 {
+		timeoutSec = 1.0
+	}
+
+	for i, inFile := range inputFiles {
 		testNum := i + 1
 		if onProgress != nil {
 			onProgress(models.StatusRunning, testNum, totalTests)
 		}
 
-		outPath := strings.TrimSuffix(inPath, ".in") + ".out"
-		inputBytes, err := os.ReadFile(inPath)
+		expectedFile := strings.TrimSuffix(inFile, ".in") + ".out"
+		expectedBytes, err := os.ReadFile(expectedFile)
 		if err != nil {
-			msg := fmt.Sprintf("failed to read input for test %d", testNum)
-			return &ExecutionResult{Verdict: models.StatusInternalError, VerdictDetails: &msg}
-		}
-		expectedBytes, err := os.ReadFile(outPath)
-		if err != nil {
-			msg := fmt.Sprintf("failed to read expected output for test %d", testNum)
+			msg := fmt.Sprintf("Missing expected output file for test case %d", testNum)
 			return &ExecutionResult{Verdict: models.StatusInternalError, VerdictDetails: &msg}
 		}
 
-		testTimeout := time.Duration(sub.TimeLimitMS) * time.Millisecond
-		runCtx, runCancel := context.WithTimeout(ctx, testTimeout)
+		inputBytes, err := os.ReadFile(inFile)
+		if err != nil {
+			msg := fmt.Sprintf("Failed to read input file for test case %d", testNum)
+			return &ExecutionResult{Verdict: models.StatusInternalError, VerdictDetails: &msg}
+		}
 
+		execCmd := fmt.Sprintf("timeout -s KILL %.3fs %s", timeoutSec, runCmd)
 		start := time.Now()
-		actualOut, exitCode, timedOut := r.runDockerContainer(
-			runCtx,
-			image,
-			jobDir,
-			runCmd,
-			inputBytes,
-			sub.MemoryLimitMB,
-			true,
-		)
+		actualOut, exitCode := r.execInSandbox(ctx, execContainerName, execCmd, inputBytes)
 		elapsedMS := int(time.Since(start).Milliseconds())
-		runCancel()
-
 		if elapsedMS > maxTimeMS {
 			maxTimeMS = elapsedMS
 		}
 
-		if timedOut {
+		if exitCode == 137 {
+			if r.isContainerOOMKilled(execContainerName) || elapsedMS < sub.TimeLimitMS {
+				msg := fmt.Sprintf("Memory Limit Exceeded on test case %d/%d", testNum, totalTests)
+				return &ExecutionResult{
+					Verdict:           models.StatusMemoryLimitExceeded,
+					VerdictDetails:    &msg,
+					ExecutionTimeMS:   elapsedMS,
+					ExecutionMemoryKB: sub.MemoryLimitMB * 1024,
+				}
+			}
 			msg := fmt.Sprintf("Time Limit Exceeded on test case %d/%d", testNum, totalTests)
 			return &ExecutionResult{
 				Verdict:         models.StatusTimeLimitExceeded,
@@ -168,114 +169,181 @@ func (r *Runner) Evaluate(ctx context.Context, sub *models.Submission, onProgres
 			}
 		}
 
-		if exitCode == 137 {
-			msg := fmt.Sprintf("Memory Limit Exceeded on test case %d/%d", testNum, totalTests)
+		if exitCode == 124 || elapsedMS >= sub.TimeLimitMS {
+			msg := fmt.Sprintf("Time Limit Exceeded on test case %d/%d", testNum, totalTests)
 			return &ExecutionResult{
-				Verdict:           models.StatusMemoryLimitExceeded,
-				VerdictDetails:    &msg,
-				ExecutionTimeMS:   maxTimeMS,
-				ExecutionMemoryKB: sub.MemoryLimitMB * 1024,
+				Verdict:         models.StatusTimeLimitExceeded,
+				VerdictDetails:  &msg,
+				ExecutionTimeMS: sub.TimeLimitMS,
 			}
 		}
 
 		if exitCode != 0 {
-			msg := fmt.Sprintf("Runtime Error on test case %d/%d (exit code %d): %s", testNum, totalTests, exitCode, strings.TrimSpace(actualOut))
+			msg := fmt.Sprintf("Runtime Error on test case %d/%d (exit code %d): %s", testNum, totalTests, exitCode, truncateOutput(actualOut, 1024))
 			return &ExecutionResult{
 				Verdict:         models.StatusRuntimeError,
 				VerdictDetails:  &msg,
-				ExecutionTimeMS: maxTimeMS,
+				ExecutionTimeMS: elapsedMS,
 			}
 		}
 
-		if strings.TrimSpace(actualOut) != strings.TrimSpace(string(expectedBytes)) {
-			msg := fmt.Sprintf("Wrong Answer on test case %d/%d: expected %q, got %q", testNum, totalTests, strings.TrimSpace(string(expectedBytes)), strings.TrimSpace(actualOut))
+		if normalizeOutput(actualOut) != normalizeOutput(string(expectedBytes)) {
+			msg := fmt.Sprintf("Wrong Answer on test case %d/%d: expected %q, got %q", testNum, totalTests, truncateOutput(normalizeOutput(string(expectedBytes)), 200), truncateOutput(normalizeOutput(actualOut), 200))
 			return &ExecutionResult{
-				Verdict:         models.StatusRuntimeError,
+				Verdict:         models.StatusWrongAnswer,
 				VerdictDetails:  &msg,
 				ExecutionTimeMS: maxTimeMS,
 			}
 		}
 	}
 
-	msg := fmt.Sprintf("Passed all %d test cases", totalTests)
+	successMsg := fmt.Sprintf("Passed all %d test cases", totalTests)
 	return &ExecutionResult{
 		Verdict:         models.StatusAccepted,
-		VerdictDetails:  &msg,
+		VerdictDetails:  &successMsg,
 		ExecutionTimeMS: maxTimeMS,
 	}
 }
 
-func (r *Runner) discoverTestCases(questionID string) ([]string, error) {
-	dir := filepath.Join(r.ProblemsDir, questionID)
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, err
-	}
-
-	var inputs []string
-	for _, e := range entries {
-		if !e.IsDir() && strings.HasSuffix(e.Name(), ".in") {
-			inputs = append(inputs, filepath.Join(dir, e.Name()))
-		}
-	}
-	sort.Strings(inputs)
-	return inputs, nil
-}
-
-func (r *Runner) runDockerContainer(
+func (r *Runner) runOneShotContainer(
 	ctx context.Context,
 	image string,
 	jobDir string,
 	command string,
-	stdinData []byte,
 	memoryMB int,
-	readOnlyWorkspace bool,
+	pidsLimit int,
 ) (string, int, bool) {
-	containerName := fmt.Sprintf("sbx-%d", time.Now().UnixNano())
-	mountMode := "rw"
-	if readOnlyWorkspace {
-		mountMode = "ro"
-	}
-
+	containerName := fmt.Sprintf("sbx-comp-%s", uuid.New().String()[:12])
 	memFlag := fmt.Sprintf("%dm", memoryMB)
+
 	args := []string{
 		"run",
 		"--rm",
-		"-i",
 		"--name", containerName,
 		"--network", "none",
 		"--memory", memFlag,
 		"--memory-swap", memFlag,
 		"--cpus", "1.0",
-		"--pids-limit", "64",
-		"-v", fmt.Sprintf("%s:/workspace:%s", jobDir, mountMode),
+		"--pids-limit", fmt.Sprintf("%d", pidsLimit),
+		"-v", fmt.Sprintf("%s:/workspace:rw", jobDir),
+		"-v", "sentinel-gocache:/tmp/gocache",
 		image,
 		"sh", "-c", command,
 	}
 
 	cmd := exec.CommandContext(ctx, "docker", args...)
-	if stdinData != nil {
-		cmd.Stdin = bytes.NewReader(stdinData)
+	var outBuf bytes.Buffer
+	cmd.Stdout = &outBuf
+	cmd.Stderr = &outBuf
+
+	err := cmd.Run()
+	if ctx.Err() == context.DeadlineExceeded {
+		_ = exec.Command("docker", "rm", "-f", containerName).Run()
+		return outBuf.String(), -1, true
 	}
+
+	exitCode := 0
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		} else {
+			exitCode = -1
+		}
+	}
+
+	return outBuf.String(), exitCode, false
+}
+
+func (r *Runner) startPersistentSandbox(
+	ctx context.Context,
+	containerName string,
+	image string,
+	jobDir string,
+	memoryMB int,
+	pidsLimit int,
+) error {
+	memFlag := fmt.Sprintf("%dm", memoryMB)
+	args := []string{
+		"run",
+		"-d",
+		"--rm",
+		"--name", containerName,
+		"--network", "none",
+		"--memory", memFlag,
+		"--memory-swap", memFlag,
+		"--cpus", "1.0",
+		"--pids-limit", fmt.Sprintf("%d", pidsLimit),
+		"-v", fmt.Sprintf("%s:/workspace:ro", jobDir),
+		image,
+		"sleep", "300",
+	}
+
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	var errBuf bytes.Buffer
+	cmd.Stderr = &errBuf
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%v: %s", err, errBuf.String())
+	}
+	return nil
+}
+
+func (r *Runner) execInSandbox(
+	ctx context.Context,
+	containerName string,
+	command string,
+	stdinData []byte,
+) (string, int) {
+	cmd := exec.CommandContext(ctx, "docker", "exec", "-i", containerName, "sh", "-c", command)
+	cmd.Stdin = bytes.NewReader(stdinData)
 
 	var outBuf bytes.Buffer
 	cmd.Stdout = &outBuf
 	cmd.Stderr = &outBuf
 
 	err := cmd.Run()
-
-	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		_ = exec.Command("docker", "rm", "-f", containerName).Run()
-		return outBuf.String(), -1, true
-	}
-
+	exitCode := 0
 	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			return outBuf.String(), exitErr.ExitCode(), false
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		} else {
+			exitCode = -1
 		}
-		return err.Error(), -1, false
 	}
+	return outBuf.String(), exitCode
+}
 
-	return outBuf.String(), 0, false
+func (r *Runner) isContainerOOMKilled(containerName string) bool {
+	out, err := exec.Command("docker", "inspect", "--format", "{{.State.OOMKilled}}", containerName).Output()
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(out)) == "true"
+}
+
+func sortTestFiles(files []string) {
+	sort.Slice(files, func(i, j int) bool {
+		baseI := strings.TrimSuffix(filepath.Base(files[i]), ".in")
+		baseJ := strings.TrimSuffix(filepath.Base(files[j]), ".in")
+		numI, errI := strconv.Atoi(baseI)
+		numJ, errJ := strconv.Atoi(baseJ)
+		if errI == nil && errJ == nil {
+			return numI < numJ
+		}
+		return files[i] < files[j]
+	})
+}
+
+func normalizeOutput(s string) string {
+	lines := strings.Split(strings.ReplaceAll(s, "\r\n", "\n"), "\n")
+	for i := range lines {
+		lines[i] = strings.TrimRight(lines[i], " \t")
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
+
+func truncateOutput(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+	return s[:maxBytes] + "\n... [output truncated]"
 }
