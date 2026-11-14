@@ -1,5 +1,10 @@
 # SentinelJudge
 
+## Live Demo
+
+- **Public Instance:** [Sentinel-Judge](https://ratios-becomes-seek-crop.trycloudflare.com)
+- **Problemset:** 400 CSES tasks with full hidden test suites
+
 A distributed, fault-tolerant remote code execution (RCE) and automated grading engine engineered in **Go**, **PostgreSQL**, **Redis**, **Docker**, and **Kubernetes**.
 
 SentinelJudge decouples high-throughput submission ingestion from untrusted code execution using a write-ahead queueing pattern, real-time Server-Sent Events (SSE) telemetry, and strict Linux kernel sandboxing (`cgroups` + `namespaces`). It includes a zero-dependency web workspace served directly by the Go API gateway.
