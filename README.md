@@ -2,7 +2,7 @@
 
 ## Live Demo
 
-- **Public Instance:** [Sentinel-Judge](https://ratios-becomes-seek-crop.trycloudflare.com)
+- **Public Instance:** [Sentinel-Judge](https://dolls-linear-directed-gnome.trycloudflare.com)
 - **Problemset:** 400 CSES tasks with full hidden test suites
 
 A distributed, fault-tolerant remote code execution (RCE) and automated grading engine engineered in **Go**, **PostgreSQL**, **Redis**, **Docker**, and **Kubernetes**.
