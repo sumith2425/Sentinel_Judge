@@ -2,7 +2,7 @@
 
 ## Live Demo
 
-- **Public Instance:** [Sentinel-Judge](https://jarvis.tailbfb685.ts.net/)
+- **Public Instance:** [Sentinel-Judge](https://sentineljudge.tailbfb685.ts.net/)
 - **Problemset:** 400 CSES tasks with full hidden test suites
 
 A distributed, fault-tolerant remote code execution (RCE) and automated grading engine engineered in **Go**, **PostgreSQL**, **Redis**, **Docker**, and **Kubernetes**.
